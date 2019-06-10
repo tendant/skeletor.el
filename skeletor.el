@@ -488,7 +488,7 @@ we should perform embedded elisp evaluation."
   (cl-assert (--all? (stringp (cdr it)) alist)))
 
 ;; [(String,String)], SkeletorExpansionSpec -> IO ()
-(defun skeletor--instantiate-spec (substitutions  eval-embedded-elisp? spec)
+(defun skeletor--instantiate-spec (substitutions  eval-embedded-elisp? skip-file spec)
   "Create an instance of the given template specification.
 
 * SUBSTITUTIONS is an alist as accepted by `s-replace-all'.
@@ -504,11 +504,15 @@ we should perform embedded elisp evaluation."
   (--each (SkeletorExpansionSpec-files spec)
     (cl-destructuring-bind (src . dest) it
       (f-touch dest)
-      (f-write (skeletor--replace-all substitutions (f-read src) eval-embedded-elisp?)
-               'utf-8 dest))))
+      (if (and skip-file
+               (string-match skip-file src))
+          (f-write (f-read src)
+                   'utf-8 dest)
+          (f-write (skeletor--replace-all substitutions (f-read src) eval-embedded-elisp?)
+                   'utf-8 dest)))))
 
 ;; [(String,String)], FilePath, FilePath -> IO ()
-(defun skeletor--instantiate-skeleton-dir (substitutions src dest eval-embedded-elisp?)
+(defun skeletor--instantiate-skeleton-dir (substitutions src dest eval-embedded-elisp? skip-file)
   "Create an instance of a project skeleton.
 
 * SUBSTITUTIONS is an alist as accepted by `s-replace-all'.
@@ -526,7 +530,7 @@ we should perform embedded elisp evaluation."
   (make-directory dest t)
   (->> (skeletor--dir->SkeletorTemplate src)
        (skeletor--expand-template-paths substitutions dest eval-embedded-elisp?)
-       (skeletor--instantiate-spec substitutions eval-embedded-elisp?)))
+       (skeletor--instantiate-spec substitutions eval-embedded-elisp? skip-file)))
 
 ;; FilePath -> IO ()
 (defun skeletor--initialize-git-repo  (dir)
@@ -791,7 +795,8 @@ This can be used to add bindings for command-line tools.
               (cons 'default-license-var (intern (format "%s-default-license" name)))
               (cons 'substitutions (eval .substitutions))
               (cons 'required-executables (eval .requires-executables))
-              (cons 'eval-embedded-elisp? (not .no-eval-embedded-elisp?))))))
+              (cons 'eval-embedded-elisp? (not .no-eval-embedded-elisp?))
+              (cons 'skip-file .skip-file)))))
 
   (defun skeletor--plist-to-alist (plist)
     "Convert PLIST to an alist, replacing keyword keys with symbols."
@@ -824,7 +829,8 @@ This can be used to add bindings for command-line tools.
   (defvar skeletor--legal-keys
     '(title initialise before-git after-creation no-git? no-license?
             default-license license-file-name requires-executables substitutions
-	    no-eval-embedded-elisp?))
+	    no-eval-embedded-elisp?
+            skip-file))
 
   (defun skeletor--alist-keys-are-all-legal? (alist)
     (null (-difference (skeletor--alist-keys alist) skeletor--legal-keys)))
@@ -890,7 +896,7 @@ This can be used to add bindings for command-line tools.
     (let-alist spec
       (unless (f-exists? skeletor-project-directory)
         (make-directory skeletor-project-directory t))
-      (skeletor--instantiate-skeleton-dir .repls .skeleton .dest .eval-embedded-elisp?)
+      (skeletor--instantiate-skeleton-dir .repls .skeleton .dest .eval-embedded-elisp? .skip-file)
       (when .license-file
         (skeletor--instantiate-license-file
          .license-file (f-join .dest .license-file-name) .repls .eval-embedded-elisp?))))
